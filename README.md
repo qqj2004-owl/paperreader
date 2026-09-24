@@ -8,6 +8,7 @@
 - **句级中文译文**：中英逐句对齐，中文视图里同样能标记/看讲解，点「原文 ↩」跳回英文句并闪光定位
 - 划词 → 术语释义气泡；暗色模式、字号、目录、全文搜索、复习模式
 - 讲解/翻译/术语由**可插拔 LLM agent** 生成（默认 DeepSeek，可换 OpenAI/其它；「直接讲解」的 key 只存浏览器本地，不写进 HTML）
+- **视觉提取兜底**：字体启发式搞不定的 PDF（正文丢失/乱码/化学式下标），可切换**视觉 LLM**（默认豆包）整页识别
 
 一个内核，两个外壳：**本地网页** 和 **桌面 App**（pywebview），共享同一套代码。
 
@@ -31,7 +32,8 @@
 | `extract.py` | PDF → 正文 + 标题（按字体自动识别，不依赖具体期刊） |
 | `figures.py` | 识别图注、裁剪图形区域 → PNG |
 | `reader.py` | 组装交互阅读器 HTML（含配图 base64 内嵌） |
-| `agents.py` | 可插拔 LLM：讲解 / 翻译 / 术语 |
+| `agents.py` | 可插拔 LLM：讲解 / 翻译 / 术语 / 视觉 |
+| `vision.py` | 整页视觉提取（把每页渲染成图交给视觉 LLM 转文本） |
 | `serve.py` | Flask 网页外壳 |
 | `desktop/main.py` | pywebview 桌面外壳 |
 
@@ -51,6 +53,8 @@ pip install -r requirements.txt
 
 ```bash
 python -m paperreader paper.pdf -o reader.html --title "标题" --meta "作者 — 期刊"
+# 字体法提取乱码时，改用视觉 LLM 整页识别：
+python -m paperreader paper.pdf --vision -o reader.html
 ```
 
 生成的 `reader.html` 是**单文件、可离线打开**的（配图已 base64 内嵌）。
@@ -60,6 +64,7 @@ python -m paperreader paper.pdf -o reader.html --title "标题" --meta "作者 �
 ```bash
 python -m paperreader.serve
 # 打开 http://127.0.0.1:5000，拖入 PDF 即生成
+# 上传页勾选「视觉提取」即走视觉 LLM 整页识别（乱码 PDF 兜底）
 ```
 
 ### 桌面 App
@@ -94,6 +99,27 @@ export PAPERREADER_API_KEY=你的key
 | `deepseek` | `https://api.deepseek.com` | `deepseek-chat` |
 | `openai` | `https://api.openai.com/v1` | `gpt-4o-mini` |
 
+视觉提取用一个独立的多模态 provider，配置键以 `vision_` 开头：
+
+```bash
+# 环境变量
+export PAPERREADER_VISION_PROVIDER=doubao
+export PAPERREADER_VISION_API_KEY=你的key
+
+# config.json
+{
+  "vision_provider": "doubao",
+  "vision_base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+  "vision_model": "doubao-seed-2-0-pro-260215",
+  "vision_api_key": "你的key"
+}
+```
+
+| vision_provider | base_url | model |
+| --- | --- | --- |
+| `doubao` | `https://ark.cn-beijing.volces.com/api/v3/chat/completions` | `doubao-seed-2-0-pro-260215` |
+| `openai` | `https://api.openai.com/v1` | `gpt-4o` |
+
 > 说明：所谓「内置 agent」就是内置了这个 LLM 调用层（`agents.py`），并非打包独立程序。
 > 因为 DeepSeek 与 OpenAI 都是 OpenAI 兼容接口，一个 `OpenAICompatProvider` 即可覆盖两家，
 > 换模型不改代码、只改配置。想接本地模型（Ollama 等）也只需加一个兼容 `base_url` 的 provider。
@@ -108,6 +134,7 @@ export PAPERREADER_API_KEY=你的key
 
 - 配图提取假设「每页一张图」，多图同页时会合并（后续按列拆分）
 - 标题识别是启发式（字号/加粗），特殊排版的期刊可加字体配置微调
+- 字体子集化严重（正文丢失、化学式下标错乱）的 PDF，请用「视觉提取」（`--vision` / 上传页勾选）兜底
 
 ## 目录结构
 
@@ -118,6 +145,7 @@ paperreader/
 │   ├── figures.py
 │   ├── reader.py
 │   ├── agents.py
+│   ├── vision.py
 │   ├── serve.py
 │   ├── __main__.py
 │   └── template.html   # 交互阅读器前端模板

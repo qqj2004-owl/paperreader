@@ -8,7 +8,8 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from .extract import build_document, clean, extract, parse_units
 from .figures import extract_figures
-from .agents import ProviderError, load_provider
+from .agents import ProviderError, load_provider, load_vision_provider
+from .vision import extract_pages, vision_to_document
 from .reader import build_reader
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
@@ -59,8 +60,13 @@ def create_app(config=None):
         title = (request.form.get("title") or "").strip()
         meta = (request.form.get("meta") or "").strip()
         abstract = (request.form.get("abstract") or "").strip()
+        use_vision = (request.form.get("vision") or "").strip() in ("1", "true", "on", "yes")
         try:
-            sentences, headings = build_document(parse_units(clean(extract(tmp))))
+            if use_vision:
+                sentences, headings = vision_to_document(
+                    extract_pages(tmp, load_vision_provider(config)))
+            else:
+                sentences, headings = build_document(parse_units(clean(extract(tmp))))
             figs = extract_figures(tmp)
             html = build_reader(sentences, headings, title=title, meta=meta,
                                 abstract=abstract, figures=figs)

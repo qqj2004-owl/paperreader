@@ -10,7 +10,8 @@ import argparse
 from .extract import build_document, clean, extract, parse_units
 from .figures import extract_figures
 from .reader import build_reader
-from .agents import load_provider
+from .agents import load_provider, load_vision_provider
+from .vision import extract_pages, vision_to_document
 
 
 def _build_zh(provider, sentences, headings):
@@ -42,13 +43,18 @@ def main(argv=None):
     ap.add_argument("--meta", default="")
     ap.add_argument("--abstract", default="")
     ap.add_argument("--no-figures", action="store_true", help="不提取配图")
+    ap.add_argument("--vision", action="store_true", help="用视觉 LLM 整页提取（兜底乱码 PDF）")
     ap.add_argument("--annotations", default=None, help="注解 JSON（可选）")
     ap.add_argument("--glossary", default=None, help="术语表 JSON（可选）")
     ap.add_argument("--zh", default=None, help="译文 JSON（可选，句级对齐格式）")
     ap.add_argument("--gen-zh", default=None, help="用 LLM 逐句翻译并写入该 JSON（首次生成，之后用 --zh 复用）")
     args = ap.parse_args(argv)
 
-    sentences, headings = build_document(parse_units(clean(extract(args.pdf))))
+    if args.vision:
+        units = extract_pages(args.pdf, load_vision_provider())
+        sentences, headings = vision_to_document(units)
+    else:
+        sentences, headings = build_document(parse_units(clean(extract(args.pdf))))
     figures = [] if args.no_figures else extract_figures(args.pdf)
 
     import json

@@ -17,6 +17,8 @@
   .drop.dragover { border-color:var(--accent); background:#f0f4ff; }
   button { margin-top:20px; width:100%; padding:12px; font-size:1em; border:none; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }
   button:disabled { background:#b9c2cc; cursor:not-allowed; }
+  .chk { display:flex; align-items:center; gap:8px; font-size:0.88em; color:#555; margin-top:16px; }
+  .chk input { width:auto; margin:0; }
   .hint { font-size:0.82em; color:var(--muted); margin-top:20px; line-height:1.6; }
   .err { color:#c0392b; font-size:0.9em; margin-top:12px; min-height:1.2em; }
 </style>
@@ -34,6 +36,7 @@
     <input type="text" id="meta" name="meta" placeholder="作者 — 期刊, 年份, 页码">
     <label for="abstract">摘要（可选）</label>
     <input type="text" id="abstract" name="abstract" placeholder="留空则不显示">
+    <label class="chk"><input type="checkbox" id="vision" name="vision" value="1"> 视觉提取（乱码 PDF 兜底，需配置视觉 LLM）</label>
     <button id="submit" type="submit" disabled>生成阅读器</button>
     <div class="err" id="err"></div>
   </form>

@@ -58,8 +58,13 @@ class OpenAICompatProvider:
         self.model = model
         self.timeout = timeout
 
+    def _chat_url(self):
+        if self.base_url.endswith("/chat/completions"):
+            return self.base_url
+        return self.base_url + "/chat/completions"
+
     def chat(self, messages, temperature=0.2, max_tokens=2048):
-        url = self.base_url + "/chat/completions"
+        url = self._chat_url()
         payload = {
             "model": self.model,
             "messages": messages,
@@ -78,6 +83,21 @@ class OpenAICompatProvider:
         except Exception as e:  # noqa: BLE001
             raise ProviderError("LLM 调用失败: %s" % e)
         return body["choices"][0]["message"]["content"]
+
+    def chat_vision(self, prompt, image_dataurls, temperature=0.2, max_tokens=4096):
+        """多模态调用：把一张或多张图（data:image/...;base64,...）+ 文字一起发给视觉模型。
+
+        image_dataurls 里的每一项是完整的 data URL（如 data:image/png;base64,....），
+        与 Doubao/OpenAI 的 image_url content 格式兼容。
+        """
+        content = [
+            {"type": "image_url", "image_url": {"url": u}} for u in image_dataurls
+        ]
+        content.append({"type": "text", "text": prompt})
+        return self.chat(
+            [{"role": "user", "content": content}],
+            temperature=temperature, max_tokens=max_tokens,
+        )
 
     def _json(self, prompt, max_tokens=2048):
         raw = self.chat([{"role": "user", "content": prompt}], max_tokens=max_tokens)
@@ -125,6 +145,16 @@ PRESETS = {
     "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini"},
 }
 
+# 视觉模型 preset（整页视觉提取 / 疑难页兜底）。豆包走火山方舟 Ark 的
+# OpenAI 兼容端点，base_url 直接给完整 /chat/completions 地址即可。
+VISION_PRESETS = {
+    "doubao": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+        "model": "doubao-seed-2-0-pro-260215",
+    },
+    "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o"},
+}
+
 
 def _load_config_file():
     """读取 config.json（包根目录或当前目录），不存在返回 {}。"""
@@ -159,3 +189,28 @@ def load_provider(config=None):
     if not base_url:
         raise ProviderError("未知 provider: %s" % provider)
     return OpenAICompatProvider(base_url, api_key, model)
+
+
+def load_vision_provider(config=None):
+    """加载视觉（多模态）provider。
+
+    配置键：vision_provider / vision_base_url / vision_model / vision_api_key，
+    环境变量：PAPERREADER_VISION_PROVIDER / PAPERREADER_VISION_BASE_URL /
+    PAPERREADER_VISION_MODEL / PAPERREADER_VISION_API_KEY。
+    优先级同 load_provider：显式参数 > 环境变量 > config.json > 内置 preset。
+    """
+    import os
+    explicit = config or {}
+    file_cfg = _load_config_file()
+
+    def pick(key, env, default=""):
+        return explicit.get(key) or os.environ.get(env) or file_cfg.get(key) or default
+
+    provider = pick("vision_provider", "PAPERREADER_VISION_PROVIDER", "doubao")
+    preset = VISION_PRESETS.get(provider, {})
+    base_url = pick("vision_base_url", "PAPERREADER_VISION_BASE_URL", preset.get("base_url"))
+    model = pick("vision_model", "PAPERREADER_VISION_MODEL", preset.get("model"))
+    api_key = pick("vision_api_key", "PAPERREADER_VISION_API_KEY", "")
+    if not base_url:
+        raise ProviderError("未知 vision_provider: %s" % provider)
+    return OpenAICompatProvider(base_url, api_key, model, timeout=300)
