@@ -261,6 +261,16 @@
     background: var(--bg); color: var(--ink);
   }
 
+  /* ===== 翻译进度条 ===== */
+  #zhProgress {
+    margin: 8px 0 16px; padding: 10px 12px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  #zhProgress .bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  #zhProgress .bar .fill { height: 100%; width: 0%; background: #3b82c4; transition: width 0.25s ease; }
+  #zhProgress .lbl { font-size: 0.82em; color: var(--muted); margin-top: 6px; }
+
   @media (max-width: 900px) {
     #sidebar { position: fixed; z-index: 50; box-shadow: 3px 0 16px rgba(0,0,0,0.2); }
   }
@@ -286,6 +296,7 @@
           <button id="zhBtn">中文译文</button>
         </div>
         <button id="tocBtn">目录</button>
+        <button id="translateAllBtn">翻译全文</button>
         <span class="search">
           <input type="search" id="searchInput" placeholder="搜索全文…">
           <span class="cnt" id="searchCount"></span>
@@ -299,6 +310,11 @@
         <button id="llmBtn" title="直接讲解的 API 设置">讲解设置</button>
         <button id="clearBtn">清除</button>
         <span class="stat">已标记 <b id="markedCount">0</b>/<span id="totalCount">0</span></span>
+      </div>
+
+      <div id="zhProgress" hidden>
+        <div class="bar"><div class="fill" id="zhFill"></div></div>
+        <div class="lbl" id="zhLbl"></div>
       </div>
 
       <div id="paper">
@@ -348,6 +364,7 @@ __SENTENCES__
   var GLOSSARY = __GLOSSARY__;
   var TOC = __TOC__;
   var ZH = __ZH__;
+  if (!ZH.length) ZH = loadJSON('pir_zh', []);
 
   var STORE_KEY = 'pir_marked_v2';
   var THEME_KEY = 'pir_theme';
@@ -528,6 +545,10 @@ __SENTENCES__
   var zhRendered = false;
   function renderZh() {
     zhRendered = true;
+    if (!ZH.length) {
+      zhViewEl.innerHTML = '<p class="zh-p" style="color:var(--muted)">暂无译文。点击工具栏「翻译全文」生成中文翻译。</p>';
+      return;
+    }
     var html = '';
     for (var i = 0; i < ZH.length; i++) {
       var u = ZH[i];
@@ -775,6 +796,103 @@ __SENTENCES__
       alert('直接讲解失败：' + (err && err.message ? err.message : err) + '\n\n可检查「讲解设置」里的 key / 接口地址，或改用「导出待讲解」复制给 AI。');
     });
   }
+
+  /* ---------- 翻译全文（浏览器直连 LLM，批量 + 进度条） ---------- */
+  function zhBatchPrompt(texts) {
+    return '把下面 ' + texts.length + ' 句英文论文逐句翻译成中文，保留专业术语。\n'
+      + '严格按顺序输出一个 JSON 数组，数组长度必须正好是 ' + texts.length + '，'
+      + '每一项就是对应那一句的中文译文。只输出 JSON 数组本身，不要序号、不要英文原文、不要任何多余说明。\n\n'
+      + JSON.stringify(texts);
+  }
+
+  function parseZhArray(raw) {
+    raw = (raw || '').trim();
+    if (raw.slice(0, 3) === '```') raw = raw.replace(/^```[a-zA-Z]*\s*/, '').replace(/```\s*$/, '');
+    try { var v = JSON.parse(raw); if (Array.isArray(v)) return v; } catch (e) {}
+    var s = raw.indexOf('['), e2 = raw.lastIndexOf(']');
+    if (s !== -1 && e2 > s) { try { var v2 = JSON.parse(raw.slice(s, e2 + 1)); if (Array.isArray(v2)) return v2; } catch (e) {} }
+    return null;
+  }
+
+  var translating = false;
+  function translateAll() {
+    if (translating) return;
+    var cfg = getLLMConfig();
+    if (!cfg.api_key) { openLLM(); return; }
+    var sents = paperEl.querySelectorAll('.sentence');
+    if (!sents.length) { alert('没有可翻译的句子'); return; }
+    var items = [];
+    for (var i = 0; i < sents.length; i++) {
+      items.push({
+        id: sents[i].getAttribute('data-id'),
+        text: sents[i].querySelector('.s-text').textContent.trim()
+      });
+    }
+    if (!confirm('翻译全文将调用 LLM 分批翻译 ' + items.length + ' 句，需要几十秒并消耗 token。是否继续？')) return;
+
+    translating = true;
+    var btn = document.getElementById('translateAllBtn');
+    btn.disabled = true;
+    var prog = document.getElementById('zhProgress');
+    prog.hidden = false;
+    var fill = document.getElementById('zhFill');
+    var lbl = document.getElementById('zhLbl');
+    var BATCH = 15;
+    var done = 0, failed = 0;
+    var zhMap = {};
+
+    function updateProg(n) {
+      var pct = Math.round(n / items.length * 100);
+      fill.style.width = pct + '%';
+      lbl.textContent = '翻译中 ' + n + '/' + items.length + ' (' + pct + '%)';
+    }
+
+    function batch(i) {
+      if (i >= items.length) { finish(); return; }
+      var chunk = items.slice(i, i + BATCH);
+      var prompt = zhBatchPrompt(chunk.map(function (x) { return x.text; }));
+      fetch(cfg.base_url + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.api_key },
+        body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }], temperature: 0.2, max_tokens: 8000 })
+      }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function (data) {
+        var content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        var arr = content ? parseZhArray(content) : null;
+        if (!arr || arr.length !== chunk.length) throw new Error('返回句数不符');
+        for (var k = 0; k < chunk.length; k++) zhMap[chunk[k].id] = arr[k];
+        done += chunk.length;
+        updateProg(done);
+        batch(i + BATCH);
+      }).catch(function () {
+        failed++;
+        if (failed > 6) { finish(); return; }  // 连续失败过多，提前结束
+        batch(i + BATCH);  // 跳过这批继续，避免死循环
+      });
+    }
+
+    function finish() {
+      translating = false;
+      btn.disabled = false;
+      prog.hidden = true;
+      var zh = [];
+      for (var j = 0; j < items.length; j++) {
+        if (zhMap[items[j].id]) zh.push({ type: 's', id: items[j].id, text: zhMap[items[j].id] });
+      }
+      if (!zh.length) { alert('翻译失败，请检查「讲解设置」里的 key / 接口地址，或稍后重试。'); return; }
+      ZH = zh;
+      saveJSON('pir_zh', ZH);
+      zhRendered = false;
+      if (viewIsZh()) renderZh();
+      alert('翻译完成：' + zh.length + '/' + items.length + ' 句。点击「中文译文」查看。');
+    }
+
+    updateProg(0);
+    batch(0);
+  }
+  document.getElementById('translateAllBtn').addEventListener('click', translateAll);
 
   /* ---------- 讲解设置弹窗 ---------- */
   function openLLM() {
