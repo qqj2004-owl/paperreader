@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ · 交互阅读器</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --muted: #8a8f98;
+    --mark-bg: #fff6e0;
+    --mark-border: #f0a500;
+    --ann-bg: #f5f8fd;
+    --ann-border: #3b82c4;
+    --ann-head: #2c5f9e;
+    --bg: #fbfbfa;
+    --panel: #ffffff;
+    --border: #e5e5e0;
+    --hover: #f0f4ff;
+    --abstract-bg: #f2f4f7;
+    --hit-bg: #ffe9a8;
+  }
+  body.dark {
+    --ink: #d7dbe0;
+    --muted: #8b929c;
+    --mark-bg: #3a3320;
+    --mark-border: #f0a500;
+    --ann-bg: #1c2530;
+    --ann-border: #4a90d9;
+    --ann-head: #7fb3e8;
+    --bg: #141619;
+    --panel: #1d2026;
+    --border: #33383f;
+    --hover: #232a33;
+    --abstract-bg: #23282f;
+    --hit-bg: #5a4a1a;
+  }
+  * { box-sizing: border-box; }
+  html { font-size: 16px; }
+  body {
+    margin: 0;
+    font-family: "Georgia", "Times New Roman", "Songti SC", "SimSun", serif;
+    color: var(--ink);
+    line-height: 1.75;
+    background: var(--bg);
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+  .layout { display: flex; }
+  .main { flex: 1; min-width: 0; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px 80px; }
+
+  header.doc { padding: 28px 0 12px; border-bottom: 2px solid var(--border); margin-bottom: 14px; }
+  header.doc h1 { font-size: 1.5em; margin: 0 0 8px; line-height: 1.3; }
+  header.doc .meta { color: var(--muted); font-size: 0.88em; }
+  header.doc .abstract {
+    margin-top: 12px; padding: 10px 14px;
+    background: var(--abstract-bg); border-left: 3px solid #b9c2cc;
+    font-size: 0.95em; border-radius: 4px;
+  }
+  header.doc .abstract b { color: var(--ann-head); }
+
+  /* ===== 工具栏 ===== */
+  .toolbar {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; margin: 10px 0 18px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 0.86em;
+  }
+  .toolbar .stat { color: var(--muted); white-space: nowrap; }
+  .toolbar .spacer { flex: 1; }
+  .toolbar button {
+    cursor: pointer; border: 1px solid #ccc; background: var(--panel); color: var(--ink);
+    padding: 5px 10px; border-radius: 5px; font-size: 0.92em; white-space: nowrap;
+  }
+  .toolbar button:hover { background: var(--hover); }
+  .toolbar button.active { background: #3b82c4; color: #fff; border-color: #3b82c4; }
+  .toolbar button.primary { background: #3b82c4; color: #fff; border-color: #3b82c4; }
+  .toolbar button.primary:hover { background: #2f6ea8; }
+  .toolbar input[type="text"], .toolbar input[type="search"] {
+    border: 1px solid #ccc; border-radius: 5px; padding: 5px 8px;
+    font-size: 0.92em; background: var(--panel); color: var(--ink);
+    width: 150px;
+  }
+  .search { display: inline-flex; align-items: center; gap: 4px; }
+  .search .cnt { color: var(--muted); font-size: 0.85em; white-space: nowrap; }
+  .view-switch { display: inline-flex; border: 1px solid #ccc; border-radius: 5px; overflow: hidden; }
+  .view-switch button { border: none; border-radius: 0; padding: 5px 10px; }
+  .view-switch button.active { background: #3b82c4; color: #fff; }
+
+  /* ===== 侧栏目录 ===== */
+  #sidebar {
+    width: 240px; flex: 0 0 240px;
+    border-right: 1px solid var(--border);
+    background: var(--panel);
+    padding: 14px 0 40px;
+    overflow-y: auto; position: sticky; top: 0; height: 100vh;
+    display: none;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  #sidebar.open { display: block; }
+  .side-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 14px 10px; font-weight: 600; font-size: 0.92em; color: var(--ann-head);
+  }
+  .side-head button { border: none; background: none; cursor: pointer; font-size: 1.1em; color: var(--muted); }
+  #tocList { list-style: none; margin: 0; padding: 0; font-size: 0.85em; }
+  #tocList li {
+    padding: 5px 14px; cursor: pointer; color: var(--ink); line-height: 1.4;
+    border-left: 3px solid transparent;
+  }
+  #tocList li:hover { background: var(--hover); }
+  #tocList li.toc-h1 { font-weight: 600; margin-top: 4px; }
+  #tocList li.toc-h2 { padding-left: 28px; color: var(--muted); }
+  #tocList li.toc-h2:hover { color: var(--ink); }
+
+  /* ===== 正文句子 ===== */
+  .sec-head {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: var(--ann-head); margin: 26px 0 6px; font-weight: 700; line-height: 1.35;
+  }
+  .sec-head.h1 { font-size: 1.18em; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .sec-head.h2 { font-size: 1.02em; }
+  .sentence {
+    padding: 5px 10px;
+    border-left: 3px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+    position: relative;
+  }
+  .sentence:hover { background: var(--hover); }
+  .sentence.marked { background: var(--mark-bg); border-left-color: var(--mark-border); }
+  .sentence.search-hit { background: var(--hit-bg); }
+  .sentence .s-id {
+    display: inline-block; color: #c4c8cf; font-size: 0.7em;
+    font-family: "Segoe UI", sans-serif; margin-right: 6px; user-select: none;
+  }
+  .sentence .s-tag {
+    display: inline-block; font-size: 0.7em; color: #fff;
+    background: #b9c2cc; border-radius: 3px; padding: 1px 6px;
+    margin-left: 6px; vertical-align: 1px; font-family: "Microsoft YaHei", sans-serif;
+  }
+  .sentence .s-tag.ready { background: #3b82c4; cursor: pointer; }
+  .sentence .s-tag.ready:hover { background: #2f6ea8; }
+  .sentence .s-tag.gen { background: #16a34a; cursor: pointer; }
+  .sentence .s-tag.gen:hover { background: #12823a; }
+  .sentence .s-tag.loading { opacity: 0.6; cursor: wait; }
+
+  /* 复习模式：只显示已标记句 */
+  body.review .sentence:not(.marked) { display: none; }
+  body.review .sec-head { display: none; }
+  body.review .fig { display: none; }
+
+  /* ===== 配图 ===== */
+  .fig { margin: 14px 0 20px; text-align: center; }
+  .fig img {
+    max-width: 100%; height: auto; border: 1px solid var(--border);
+    border-radius: 6px; cursor: zoom-in; background: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  .fig figcaption {
+    margin-top: 5px; font-size: 0.78em; color: var(--muted);
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+
+  /* ===== 图片放大灯箱 ===== */
+  .lightbox {
+    position: fixed; inset: 0; z-index: 400;
+    background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center;
+    cursor: zoom-out; padding: 24px;
+  }
+  .lightbox[hidden] { display: none; }
+  .lightbox img { max-width: 100%; max-height: 100%; background: #fff; border-radius: 4px; }
+
+  .annotation {
+    margin: 4px 0 10px 12px;
+    background: var(--ann-bg);
+    border-left: 3px solid var(--ann-border);
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-size: 0.93em;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .annotation .ann-title { font-weight: 600; color: var(--ann-head); margin-bottom: 6px; }
+  .annotation .ann-step { margin: 6px 0; }
+  .annotation .ann-step b {
+    color: var(--ann-head); background: #e4edf7; border-radius: 3px;
+    padding: 0 6px; margin-right: 6px; font-size: 0.92em; white-space: nowrap;
+  }
+  body.dark .annotation .ann-step b { background: #26323f; }
+  .annotation table { border-collapse: collapse; margin: 6px 0; font-size: 0.92em; }
+  .annotation th, .annotation td { border: 1px solid var(--border); padding: 3px 8px; text-align: left; }
+  .annotation th { background: var(--abstract-bg); }
+
+  /* ===== 中文译文视图 ===== */
+  #zhView { max-width: 880px; margin: 0 auto; padding: 0 20px 80px; }
+  #zhView .zh-h1 {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    color: var(--ann-head); font-size: 1.2em; font-weight: 700;
+    margin: 26px 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px;
+  }
+  #zhView .zh-h2 {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    color: var(--ann-head); font-size: 1.04em; font-weight: 700; margin: 18px 0 6px;
+  }
+  #zhView .zh-p { margin: 8px 0; text-indent: 2em; }
+  #zhView .zh-sentence {
+    padding: 5px 10px; border-left: 3px solid transparent; border-radius: 4px;
+    cursor: pointer; position: relative;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+  #zhView .zh-sentence:hover { background: var(--hover); }
+  #zhView .zh-sentence.marked { background: var(--mark-bg); border-left-color: var(--mark-border); }
+  #zhView .zh-jump {
+    display: none; font-size: 0.75em; color: var(--ann-head); cursor: pointer;
+    margin-left: 8px; white-space: nowrap;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  #zhView .zh-sentence:hover .zh-jump,
+  #zhView .zh-sentence.marked .zh-jump { display: inline; }
+  #zhView .zh-sentence .s-tag { margin-left: 6px; }
+
+  /* ===== 划词翻译气泡 ===== */
+  #glossTip {
+    position: fixed; z-index: 200; max-width: 320px;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--ann-border); border-radius: 6px;
+    padding: 8px 12px; font-size: 0.85em; line-height: 1.5;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  #glossTip .gt-term { font-weight: 700; color: var(--ann-head); }
+
+  /* ===== 弹窗 ===== */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center; z-index: 300;
+  }
+  /* display:flex 会覆盖 hidden 属性的默认 display:none，需显式补回 */
+  .modal-backdrop[hidden] { display: none; }
+  .modal {
+    background: var(--panel); border-radius: 8px; max-width: 640px; width: 92%;
+    padding: 18px 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--ink);
+  }
+  .modal h3 { margin: 0 0 8px; font-size: 1.05em; }
+  .modal p { color: var(--muted); font-size: 0.85em; margin: 0 0 10px; }
+  .modal textarea {
+    width: 100%; height: 180px; font-size: 0.8em;
+    border: 1px solid #ccc; border-radius: 5px; padding: 8px;
+    font-family: monospace; resize: vertical; background: var(--bg); color: var(--ink);
+  }
+  .modal .actions { margin-top: 12px; text-align: right; }
+  .modal .llm-label { display: block; font-size: 0.78em; color: var(--muted); margin: 6px 0 2px; }
+  .modal input[type="text"], .modal input[type="password"] {
+    width: 100%; font-size: 0.85em; box-sizing: border-box;
+    border: 1px solid #ccc; border-radius: 5px; padding: 6px 8px;
+    background: var(--bg); color: var(--ink);
+  }
+
+  @media (max-width: 900px) {
+    #sidebar { position: fixed; z-index: 50; box-shadow: 3px 0 16px rgba(0,0,0,0.2); }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside id="sidebar">
+    <div class="side-head"><span>目录</span><button id="sideClose" title="关闭">×</button></div>
+    <ul id="tocList"></ul>
+  </aside>
+  <div class="main">
+    <div class="wrap">
+      <header class="doc">
+        <h1>__TITLE__</h1>
+        <div class="meta">__META__</div>
+        <div class="abstract">__ABSTRACT__</div>
+      </header>
+
+      <div class="toolbar">
+        <div class="view-switch">
+          <button id="enBtn" class="active">英文原文</button>
+          <button id="zhBtn">中文译文</button>
+        </div>
+        <button id="tocBtn">目录</button>
+        <span class="search">
+          <input type="search" id="searchInput" placeholder="搜索全文…">
+          <span class="cnt" id="searchCount"></span>
+        </span>
+        <span class="spacer"></span>
+        <button id="fontMinus" title="缩小字号">A−</button>
+        <button id="fontPlus" title="放大字号">A+</button>
+        <button id="darkBtn" title="暗色/亮色">暗色</button>
+        <button id="reviewBtn" title="只看已标记句">复习</button>
+        <button id="exportBtn" class="primary">导出待讲解</button>
+        <button id="llmBtn" title="直接讲解的 API 设置">讲解设置</button>
+        <button id="clearBtn">清除</button>
+        <span class="stat">已标记 <b id="markedCount">0</b>/<span id="totalCount">0</span></span>
+      </div>
+
+      <div id="paper">
+__SENTENCES__
+      </div>
+
+      <div id="zhView" hidden></div>
+    </div>
+  </div>
+</div>
+
+<div id="glossTip" hidden></div>
+
+<div class="lightbox" id="lightbox" hidden><img id="lightboxImg" alt=""></div>
+
+<div class="modal-backdrop" id="exportModal" hidden>
+  <div class="modal">
+    <h3>导出「待讲解」标记</h3>
+    <p>下面是「已标记但没有讲解」的句子。复制整段发给 Claude，让它一次性补齐讲解。</p>
+    <textarea id="exportText" readonly></textarea>
+    <div class="actions">
+      <button id="copyBtn">复制</button>
+      <button id="closeModalBtn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="llmModal" hidden>
+  <div class="modal">
+    <h3>直接讲解 · API 设置</h3>
+    <p>点句子的「直接讲解」按钮，会在浏览器里直接调用 OpenAI 兼容接口生成五步拆解。key 只存在你的浏览器本地（localStorage），不会写进 HTML 文件，分享/发布都不泄露。</p>
+    <label class="llm-label">接口地址 base_url</label>
+    <input type="text" id="llmBase" placeholder="https://api.deepseek.com">
+    <label class="llm-label">模型 model</label>
+    <input type="text" id="llmModel" placeholder="deepseek-chat">
+    <label class="llm-label">API Key</label>
+    <input type="password" id="llmKey" placeholder="sk-...">
+    <div class="actions">
+      <button id="llmSave" class="primary">保存</button>
+      <button id="llmClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  var ANNOTATIONS = __ANNOTATIONS__;
+  var GLOSSARY = __GLOSSARY__;
+  var TOC = __TOC__;
+  var ZH = __ZH__;
+
+  var STORE_KEY = 'pir_marked_v2';
+  var THEME_KEY = 'pir_theme';
+  var FONT_KEY = 'pir_fontsize';
+  var VIEW_KEY = 'pir_view';
+
+  var paperEl = document.getElementById('paper');
+  var zhViewEl = document.getElementById('zhView');
+
+  /* ---------- 状态持久化 ---------- */
+  function loadJSON(key, dflt) { try { return JSON.parse(localStorage.getItem(key)) ?? dflt; } catch (e) { return dflt; } }
+  function saveJSON(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {} }
+  var marked = loadJSON(STORE_KEY, []);
+
+  var generatedAnn = loadJSON('pir_generated_ann', {});
+  function hasAnnotation(id) {
+    return Object.prototype.hasOwnProperty.call(ANNOTATIONS, id) ||
+           Object.prototype.hasOwnProperty.call(generatedAnn, id);
+  }
+  function getAnnotation(id) { return ANNOTATIONS[id] || generatedAnn[id]; }
+
+  /* ---------- 讲解渲染 ---------- */
+  function renderAnnotation(id) {
+    var ann = getAnnotation(id);
+    var steps = [
+      ['① 定位', ann['定位']],
+      ['② 还原省略的推理', ann['拆链']],
+      ['③ 数字锚定', ann['数字']],
+      ['④ 一路挖到底', ann['挖到底']],
+      ['⑤ 收拢', ann['收拢']]
+    ];
+    var el = document.createElement('div');
+    el.className = 'annotation';
+    el.id = 'ann-' + id;
+    el.hidden = true;
+    var html = '<div class="ann-title">讲解 · 五步拆解</div>';
+    for (var i = 0; i < steps.length; i++) {
+      var content = steps[i][1];
+      if (content) html += '<p class="ann-step"><b>' + steps[i][0] + '</b>' + content + '</p>';
+    }
+    el.innerHTML = html;
+    return el;
+  }
+
+  function updateSentence(sentEl) {
+    var id = sentEl.getAttribute('data-id');
+    var isMarked = marked.indexOf(id) !== -1;
+    sentEl.classList.toggle('marked', isMarked);
+    var oldTag = sentEl.querySelector('.s-tag');
+    if (oldTag) oldTag.remove();
+    if (isMarked) {
+      var tag = document.createElement('span');
+      if (hasAnnotation(id)) {
+        tag.className = 's-tag ready';
+        tag.textContent = '讲解 ▾';
+        tag.setAttribute('data-toggle', id);
+      } else {
+        tag.className = 's-tag gen';
+        tag.textContent = '直接讲解';
+      }
+      sentEl.appendChild(tag);
+    }
+    updateCounts();
+  }
+
+  function setTagsText(id, text) {
+    var tags = document.querySelectorAll('[data-id="' + id + '"] .s-tag.ready');
+    for (var i = 0; i < tags.length; i++) tags[i].textContent = text;
+  }
+
+  function updateSentenceById(id) {
+    var els = document.querySelectorAll('[data-id="' + id + '"]');
+    for (var i = 0; i < els.length; i++) updateSentence(els[i]);
+  }
+
+  function toggleAnnotation(id, hostEl) {
+    var ann = document.getElementById('ann-' + id);
+    if (ann && !ann.hidden) {
+      ann.hidden = true;
+      setTagsText(id, '讲解 ▾');
+      return;
+    }
+    if (!ann) ann = renderAnnotation(id);
+    hostEl.parentNode.insertBefore(ann, hostEl.nextSibling);
+    ann.hidden = false;
+    setTagsText(id, '讲解 ▴');
+  }
+
+  function closeAllAnnotations() {
+    var open = document.querySelectorAll('.annotation:not([hidden])');
+    for (var i = 0; i < open.length; i++) {
+      open[i].hidden = true;
+      setTagsText(open[i].id.replace(/^ann-/, ''), '讲解 ▾');
+    }
+  }
+
+  function updateCounts() {
+    document.getElementById('markedCount').textContent = marked.length;
+  }
+
+  function jumpToEnglish(id) {
+    switchView('en');
+    var sentEl = paperEl.querySelector('[data-id="' + id + '"]');
+    if (sentEl) {
+      sentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      flash(sentEl);
+    }
+  }
+
+  function onSentenceClick(e) {
+    var jump = e.target.closest && e.target.closest('.zh-jump');
+    if (jump) { jumpToEnglish(jump.parentNode.getAttribute('data-id')); return; }
+    var toggle = e.target.closest && e.target.closest('.s-tag.ready');
+    var gen = e.target.closest && e.target.closest('.s-tag.gen');
+    var sentEl = e.target.closest && e.target.closest('[data-id]');
+    if (!sentEl) return;
+    var id = sentEl.getAttribute('data-id');
+    if (toggle) { toggleAnnotation(id, sentEl); return; }
+    if (gen) { generateExplain(id, sentEl); return; }
+    var idx = marked.indexOf(id);
+    if (idx === -1) marked.push(id); else marked.splice(idx, 1);
+    saveJSON(STORE_KEY, marked);
+    updateSentenceById(id);
+  }
+
+  paperEl.addEventListener('click', onSentenceClick);
+  zhViewEl.addEventListener('click', onSentenceClick);
+
+  /* ---------- 目录 ---------- */
+  var tocList = document.getElementById('tocList');
+  TOC.forEach(function (item) {
+    var li = document.createElement('li');
+    li.className = 'toc-' + item.level;
+    li.textContent = item.title;
+    li.addEventListener('click', function () {
+      var target = document.getElementById(item.id || item.anchor);
+      if (target) {
+        if (viewIsZh()) switchView('en');
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        flash(target);
+      }
+    });
+    tocList.appendChild(li);
+  });
+
+  function flash(el) {
+    var orig = el.style.transition;
+    el.style.transition = 'none';
+    el.style.outline = '2px solid var(--ann-border)';
+    setTimeout(function () { el.style.outline = ''; el.style.transition = orig; }, 1200);
+  }
+
+  var sidebar = document.getElementById('sidebar');
+  function toggleSidebar(force) {
+    var open = force !== undefined ? force : !sidebar.classList.contains('open');
+    sidebar.classList.toggle('open', open);
+  }
+  document.getElementById('tocBtn').addEventListener('click', function () { toggleSidebar(); });
+  document.getElementById('sideClose').addEventListener('click', function () { toggleSidebar(false); });
+
+  /* ---------- 中英视图切换 ---------- */
+  var viewMode = localStorage.getItem(VIEW_KEY) || 'en';
+  function viewIsZh() { return viewMode === 'zh'; }
+  function switchView(mode) {
+    viewMode = mode;
+    localStorage.setItem(VIEW_KEY, mode);
+    var zh = mode === 'zh';
+    paperEl.hidden = zh;
+    zhViewEl.hidden = !zh;
+    document.getElementById('enBtn').classList.toggle('active', !zh);
+    document.getElementById('zhBtn').classList.toggle('active', zh);
+    closeAllAnnotations();
+    if (zh && !zhRendered) renderZh();
+  }
+  document.getElementById('enBtn').addEventListener('click', function () { switchView('en'); });
+  document.getElementById('zhBtn').addEventListener('click', function () { switchView('zh'); });
+
+  var zhRendered = false;
+  function renderZh() {
+    zhRendered = true;
+    var html = '';
+    for (var i = 0; i < ZH.length; i++) {
+      var u = ZH[i];
+      if (u.type === 'h1') html += '<div class="zh-h1">' + esc(u.text) + '</div>';
+      else if (u.type === 'h2') html += '<div class="zh-h2">' + esc(u.text) + '</div>';
+      else if (u.type === 's') {
+        html += '<div class="zh-sentence" data-id="' + esc(u.id || '') + '">'
+          + '<span class="zh-text">' + esc(u.text) + '</span>'
+          + '<span class="zh-jump" title="跳到对应英文句">原文 ↩</span>'
+          + '</div>';
+      }
+      else html += '<p class="zh-p">' + esc(u.text) + '</p>';
+    }
+    zhViewEl.innerHTML = html;
+    var zhSentences = zhViewEl.querySelectorAll('.zh-sentence');
+    for (var j = 0; j < zhSentences.length; j++) updateSentence(zhSentences[j]);
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  /* ---------- 暗色模式 ---------- */
+  var darkBtn = document.getElementById('darkBtn');
+  function applyTheme(dark) {
+    document.body.classList.toggle('dark', dark);
+    darkBtn.textContent = dark ? '亮色' : '暗色';
+  }
+  applyTheme(localStorage.getItem(THEME_KEY) === '1');
+  darkBtn.addEventListener('click', function () {
+    var dark = !document.body.classList.contains('dark');
+    applyTheme(dark);
+    localStorage.setItem(THEME_KEY, dark ? '1' : '0');
+  });
+
+  /* ---------- 字号 ---------- */
+  var FONT_MIN = 13, FONT_MAX = 22, FONT_STEP = 1;
+  var curFont = parseInt(localStorage.getItem(FONT_KEY) || '16', 10);
+  if (isNaN(curFont)) curFont = 16;
+  function applyFont(n) {
+    curFont = Math.max(FONT_MIN, Math.min(FONT_MAX, n));
+    document.documentElement.style.fontSize = curFont + 'px';
+    localStorage.setItem(FONT_KEY, String(curFont));
+  }
+  applyFont(curFont);
+  document.getElementById('fontMinus').addEventListener('click', function () { applyFont(curFont - FONT_STEP); });
+  document.getElementById('fontPlus').addEventListener('click', function () { applyFont(curFont + FONT_STEP); });
+
+  /* ---------- 复习模式 ---------- */
+  var reviewBtn = document.getElementById('reviewBtn');
+  var reviewOn = false;
+  reviewBtn.addEventListener('click', function () {
+    reviewOn = !reviewOn;
+    document.body.classList.toggle('review', reviewOn);
+    reviewBtn.classList.toggle('active', reviewOn);
+    if (reviewOn && viewIsZh()) switchView('en');
+  });
+
+  /* ---------- 全文搜索 ---------- */
+  var searchInput = document.getElementById('searchInput');
+  var searchCount = document.getElementById('searchCount');
+  var hits = [];
+  var hitIndex = -1;
+  function clearHits() {
+    for (var i = 0; i < hits.length; i++) hits[i].classList.remove('search-hit');
+    hits = [];
+    hitIndex = -1;
+  }
+  function doSearch(q) {
+    clearHits();
+    searchCount.textContent = '';
+    q = q.trim().toLowerCase();
+    if (!q) return;
+    var all = paperEl.querySelectorAll('.sentence');
+    var first = null;
+    for (var i = 0; i < all.length; i++) {
+      var t = all[i].querySelector('.s-text').textContent.toLowerCase();
+      if (t.indexOf(q) !== -1) {
+        all[i].classList.add('search-hit');
+        hits.push(all[i]);
+        if (!first) first = all[i];
+      }
+    }
+    searchCount.textContent = hits.length ? hits.length + ' 处' : '无匹配';
+    if (first) { first.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  }
+  searchInput.addEventListener('input', function () {
+    if (viewIsZh()) switchView('en');
+    doSearch(searchInput.value);
+  });
+  searchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && hits.length) {
+      e.preventDefault();
+      hitIndex = (hitIndex + 1) % hits.length;
+      var next = hits[hitIndex];
+      if (next) next.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
+
+  /* ---------- 划词翻译 ---------- */
+  var glossTip = document.getElementById('glossTip');
+  function normTerm(s) {
+    return String(s).toLowerCase().replace(/[^a-z0-9α-ω ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  var GLOSS_NORM = {};
+  Object.keys(GLOSSARY).forEach(function (k) {
+    GLOSS_NORM[normTerm(k)] = { term: k, def: GLOSSARY[k] };
+  });
+  function lookupGlossary(sel) {
+    var norm = normTerm(sel);
+    if (!norm) return null;
+    if (GLOSS_NORM[norm]) return GLOSS_NORM[norm];
+    var keys = Object.keys(GLOSS_NORM);
+    for (var i = 0; i < keys.length; i++) {
+      if (norm.indexOf(keys[i]) !== -1) return GLOSS_NORM[keys[i]];
+    }
+    return null;
+  }
+  paperEl.addEventListener('mouseup', function (e) {
+    var sel = window.getSelection().toString().trim();
+    if (!sel || sel.length > 60) { glossTip.hidden = true; return; }
+    var hit = lookupGlossary(sel);
+    if (!hit) { glossTip.hidden = true; return; }
+    glossTip.innerHTML = '<span class="gt-term">' + esc(hit.term) + '</span>　' + esc(hit.def);
+    glossTip.hidden = false;
+    var x = e.clientX + 12, y = e.clientY + 12;
+    var r = glossTip.getBoundingClientRect();
+    if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - 12;
+    if (y + r.height > window.innerHeight - 8) y = e.clientY - r.height - 12;
+    glossTip.style.left = x + 'px';
+    glossTip.style.top = y + 'px';
+  });
+  document.addEventListener('mousedown', function (e) {
+    if (glossTip.hidden) return;
+    if (!glossTip.contains(e.target)) glossTip.hidden = true;
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') glossTip.hidden = true;
+  });
+
+  /* ---------- 配图放大灯箱 ---------- */
+  var lightbox = document.getElementById('lightbox');
+  var lightboxImg = document.getElementById('lightboxImg');
+  paperEl.addEventListener('click', function (e) {
+    var img = e.target.closest && e.target.closest('.fig img');
+    if (!img) return;
+    lightboxImg.src = img.src;
+    lightbox.hidden = false;
+  });
+  lightbox.addEventListener('click', function () { lightbox.hidden = true; });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') lightbox.hidden = true; });
+
+  /* ---------- 导出待讲解 ---------- */
+  function collectPending() {
+    var out = [], seen = {};
+    for (var i = 0; i < marked.length; i++) {
+      var id = marked[i];
+      if (!hasAnnotation(id) && !seen[id]) {
+        seen[id] = true;
+        var sentEl = paperEl.querySelector('[data-id="' + id + '"]');
+        var txt = sentEl ? sentEl.querySelector('.s-text').textContent.trim() : '';
+        out.push(id + '  ' + txt);
+      }
+    }
+    return out;
+  }
+  document.getElementById('exportBtn').addEventListener('click', function () {
+    var list = collectPending();
+    if (list.length === 0) { alert('没有待讲解的标记（已标记的句子都已有讲解，或尚未标记任何句子）。'); return; }
+    document.getElementById('exportText').value = list.join('\n');
+    document.getElementById('exportModal').hidden = false;
+  });
+
+  function closeModal() { document.getElementById('exportModal').hidden = true; }
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  document.getElementById('exportModal').addEventListener('click', function (e) { if (e.target === this) closeModal(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
+
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var ta = document.getElementById('exportText');
+    ta.select(); ta.setSelectionRange(0, ta.value.length);
+    var done = false;
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(ta.value); done = true; } } catch (e) {}
+    if (!done) { try { done = document.execCommand('copy'); } catch (e) {} }
+    if (done) { this.textContent = '已复制 ✓'; setTimeout(function () { document.getElementById('copyBtn').textContent = '复制'; }, 1500); }
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    if (!confirm('清除全部标记？（讲解内容不受影响）')) return;
+    marked = [];
+    saveJSON(STORE_KEY, marked);
+    var all = document.querySelectorAll('[data-id]');
+    for (var i = 0; i < all.length; i++) updateSentence(all[i]);
+  });
+
+  /* ---------- 直接讲解（浏览器直连 LLM） ---------- */
+  var LLM_KEY = 'pir_llm';
+  function getLLMConfig() {
+    var c = loadJSON(LLM_KEY, {}) || {};
+    return {
+      base_url: (c.base_url || 'https://api.deepseek.com').replace(/\/+$/, ''),
+      model: c.model || 'deepseek-chat',
+      api_key: c.api_key || ''
+    };
+  }
+
+  var EXPLAIN_PROMPT_JS = '你是化学/材料领域的论文精读助教。请把下面这句英文论文用中文做"五步拆解"讲解，\n严格输出 JSON，键为 定位/拆链/数字/挖到底/收拢：\n- 定位：这句话在论证链条里的作用（一句话）。\n- 拆链：还原句中省略的因果/推理步骤。\n- 数字：句中数字、单位、比例的物理含义。\n- 挖到底：涉及的底层概念/原理。\n- 收拢：用一句话复述本句核心结论。\n只输出 JSON，不要多余文字。\n\n句子：{sentence}';
+
+  function parseExplainJson(raw) {
+    raw = (raw || '').trim();
+    if (raw.slice(0, 3) === '```') {
+      raw = raw.replace(/^```[a-zA-Z]*\s*/, '').replace(/```\s*$/, '');
+    }
+    try { return JSON.parse(raw); } catch (e) {}
+    var s = raw.indexOf('{'), e2 = raw.lastIndexOf('}');
+    if (s !== -1 && e2 > s) { try { return JSON.parse(raw.slice(s, e2 + 1)); } catch (e2) {} }
+    return { '定位': raw };
+  }
+
+  function generateExplain(id, sentEl) {
+    var cfg = getLLMConfig();
+    if (!cfg.api_key) { openLLM(); return; }
+    var tag = sentEl.querySelector('.s-tag.gen');
+    if (tag) { tag.textContent = '讲解中…'; tag.classList.add('loading'); }
+    var textEl = paperEl.querySelector('[data-id="' + id + '"] .s-text');
+    var text = textEl ? textEl.textContent.trim() : '';
+    var prompt = EXPLAIN_PROMPT_JS.replace('{sentence}', text);
+    fetch(cfg.base_url + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.api_key },
+      body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }], temperature: 0.2, max_tokens: 2048 })
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function (data) {
+      var content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+      if (!content) throw new Error('无返回内容');
+      generatedAnn[id] = parseExplainJson(content);
+      saveJSON('pir_generated_ann', generatedAnn);
+      updateSentenceById(id);
+      toggleAnnotation(id, sentEl);
+    }).catch(function (err) {
+      if (tag) { tag.textContent = '直接讲解'; tag.classList.remove('loading'); }
+      alert('直接讲解失败：' + (err && err.message ? err.message : err) + '\n\n可检查「讲解设置」里的 key / 接口地址，或改用「导出待讲解」复制给 AI。');
+    });
+  }
+
+  /* ---------- 讲解设置弹窗 ---------- */
+  function openLLM() {
+    var c = getLLMConfig();
+    document.getElementById('llmBase').value = c.base_url;
+    document.getElementById('llmModel').value = c.model;
+    document.getElementById('llmKey').value = c.api_key;
+    document.getElementById('llmModal').hidden = false;
+  }
+  function closeLLM() { document.getElementById('llmModal').hidden = true; }
+  document.getElementById('llmBtn').addEventListener('click', openLLM);
+  document.getElementById('llmClose').addEventListener('click', closeLLM);
+  document.getElementById('llmModal').addEventListener('click', function (e) { if (e.target === this) closeLLM(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLLM(); });
+  document.getElementById('llmSave').addEventListener('click', function () {
+    saveJSON(LLM_KEY, {
+      base_url: document.getElementById('llmBase').value.trim(),
+      model: document.getElementById('llmModel').value.trim(),
+      api_key: document.getElementById('llmKey').value.trim()
+    });
+    closeLLM();
+  });
+
+  /* ---------- 初始化 ---------- */
+  (function init() {
+    var all = paperEl.querySelectorAll('.sentence');
+    document.getElementById('totalCount').textContent = all.length;
+    for (var i = 0; i < all.length; i++) updateSentence(all[i]);
+    if (viewIsZh()) switchView('zh');
+  })();
+</script>
+</body>
+</html>

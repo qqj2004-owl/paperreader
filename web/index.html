@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>paperreader · 任意文献交互阅读器</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#8a8f98; --accent:#3b82c4; --bg:#fbfbfa; --panel:#fff; --border:#e5e5e0; }
+  body { margin:0; font-family:"Segoe UI","Microsoft YaHei",sans-serif; color:var(--ink); background:var(--bg); }
+  .wrap { max-width:640px; margin:0 auto; padding:60px 20px; }
+  h1 { font-size:1.6em; margin:0 0 6px; }
+  .sub { color:var(--muted); font-size:0.95em; margin-bottom:28px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:24px; box-shadow:0 2px 10px rgba(0,0,0,0.05); }
+  label { display:block; font-size:0.9em; margin:14px 0 6px; color:#555; }
+  input[type="text"], input[type="file"] { width:100%; box-sizing:border-box; padding:9px 12px; border:1px solid #ccc; border-radius:6px; font-size:0.95em; }
+  .drop { border:2px dashed #ccc; border-radius:8px; padding:28px; text-align:center; color:var(--muted); cursor:pointer; margin-top:14px; }
+  .drop.dragover { border-color:var(--accent); background:#f0f4ff; }
+  button { margin-top:20px; width:100%; padding:12px; font-size:1em; border:none; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }
+  button:disabled { background:#b9c2cc; cursor:not-allowed; }
+  .hint { font-size:0.82em; color:var(--muted); margin-top:20px; line-height:1.6; }
+  .err { color:#c0392b; font-size:0.9em; margin-top:12px; min-height:1.2em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>paperreader</h1>
+  <div class="sub">拖入任意 PDF，生成可点读的交互阅读器（正文内嵌配图，可标记疑难句）。</div>
+  <form id="form" class="card" method="post" action="/render" enctype="multipart/form-data">
+    <div class="drop" id="drop">点击或拖拽 PDF 到此处</div>
+    <input type="file" id="file" name="file" accept=".pdf,application/pdf" required hidden>
+    <label for="title">标题（可选）</label>
+    <input type="text" id="title" name="title" placeholder="留空则不显示">
+    <label for="meta">出处（可选）</label>
+    <input type="text" id="meta" name="meta" placeholder="作者 — 期刊, 年份, 页码">
+    <label for="abstract">摘要（可选）</label>
+    <input type="text" id="abstract" name="abstract" placeholder="留空则不显示">
+    <button id="submit" type="submit" disabled>生成阅读器</button>
+    <div class="err" id="err"></div>
+  </form>
+  <div class="hint">
+    提示：<br>
+    · 讲解/翻译/术语由内置 agent 按需生成（需配置 DeepSeek/OpenAI API key，见 config.example.json）。<br>
+    · 本地离线运行，PDF 不会上传到任何外部服务器。
+  </div>
+</div>
+<script>
+  var file = document.getElementById('file');
+  var drop = document.getElementById('drop');
+  var submit = document.getElementById('submit');
+  var err = document.getElementById('err');
+
+  function pick(e) { e.preventDefault(); file.click(); }
+  drop.addEventListener('click', pick);
+  drop.addEventListener('dragover', function (e) { e.preventDefault(); drop.classList.add('dragover'); });
+  drop.addEventListener('dragleave', function () { drop.classList.remove('dragover'); });
+  drop.addEventListener('drop', function (e) {
+    e.preventDefault(); drop.classList.remove('dragover');
+    if (e.dataTransfer.files.length) { file.files = e.dataTransfer.files; sync(); }
+  });
+  file.addEventListener('change', sync);
+  function sync() {
+    if (file.files.length) {
+      drop.textContent = file.files[0].name;
+      submit.disabled = false;
+    } else {
+      drop.textContent = '点击或拖拽 PDF 到此处';
+      submit.disabled = true;
+    }
+  }
+  document.getElementById('form').addEventListener('submit', function () {
+    if (!file.files.length) { err.textContent = '请先选择 PDF 文件'; return false; }
+    submit.disabled = true; submit.textContent = '正在提取…';
+    return true;
+  });
+</script>
+</body>
+</html>

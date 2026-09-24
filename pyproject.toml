@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paperreader"
+version = "0.1.0"
+description = "任意文献交互阅读器：提取 PDF 正文/配图，注入讲解/翻译/术语，生成可点读网页"
+requires-python = ">=3.8"
+dependencies = [
+  "pymupdf>=1.23",
+  "flask>=2.3",
+]
+
+[project.optional-dependencies]
+desktop = ["pywebview>=4.0"]
+
+[project.scripts]
+paperreader = "paperreader.__main__:main"
+
+[tool.setuptools]
+packages = ["paperreader"]
+
+[tool.setuptools.package-data]
+paperreader = ["template.html"]

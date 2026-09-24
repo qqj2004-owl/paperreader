@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+instance/
+config.json
+*.pdf
+/*.html
+# 生成的演示数据（含论文原文/译文，勿提交）
+zh_sentences.json
+.DS_Store
+*.egg-info/
+build/
+dist/
