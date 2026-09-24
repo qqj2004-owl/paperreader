@@ -60,6 +60,7 @@ def classify_span(sp, body_font, body_size, inline=False):
     font = sp.get("font", "")
     size = sp.get("size", 0)
     low = font.lower()
+    n = len(txt.strip())
 
     # 字号明显偏小：行内保留，独立行丢弃
     if size < body_size - 0.6:
@@ -67,15 +68,16 @@ def classify_span(sp, body_font, body_size, inline=False):
     # 正文字体且字号接近 → 正文
     if font == body_font and abs(size - body_size) < 0.2:
         return "body", txt
-    # 斜体/粗斜体 → H2 子标题
-    if ("itali" in low or "oblique" in low) and size >= body_size - 0.15:
+    # 明显偏大的字 → 文章大标题（含多行标题）；阈值用 1.6 倍正文字号，
+    # 以区分真正的标题和期刊横幅类型标签（如 "ARTICLE"，通常只略大于正文）
+    if size >= body_size * 1.6:
+        return ("h1", txt) if n >= 2 else (None, "")
+    # 斜体/粗斜体 → H2 子标题（单字母图注标签 "a"/"b" 不当标题）
+    if ("itali" in low or "oblique" in low) and size >= body_size - 0.15 and n >= 3:
         return "h2", txt
     # 粗/黑/半粗/中黑 → H1 章节/文章标题
-    if any(k in low for k in ("black", "bold", "semibold", "heavy", "medium")) and size >= body_size - 0.15:
+    if any(k in low for k in ("black", "bold", "semibold", "heavy", "medium")) and size >= body_size - 0.15 and n >= 3:
         return "h1", txt
-    # 明显偏大的短字（期刊横幅/logo，如 "REVIEWS"）→ 丢弃
-    if size >= body_size + 1.5 and len(txt.strip()) <= 20:
-        return None, ""
     # Light/Regular 等其它字体、字号接近正文 → 正文（摘要、作者行等）
     if size >= body_size - 0.6:
         return "body", txt
@@ -115,11 +117,20 @@ def extract(pdf_path):
 
             for line in blk.get("lines", []):
                 spans = line.get("spans", [])
+                if cur_parts:
+                    # 行间插入 \n，交给 clean() 统一处理（普通换行→空格、连字符换行→合并）
+                    cur_parts.append("\n")
                 line_has_body = any(
                     sp.get("font", "") == body_font and abs(sp.get("size", 0) - body_size) < 0.2
                     for sp in spans
                 )
                 for sp in spans:
+                    stxt = sp.get("text", "")
+                    if not stxt.strip():
+                        # 纯空白 span（独立的词间空格）也要保留，否则单词会被拼在一起
+                        if stxt and cur_parts:
+                            cur_parts.append(" ")
+                        continue
                     kind, txt = classify_span(sp, body_font, body_size, inline=line_has_body)
                     if kind is None:
                         continue

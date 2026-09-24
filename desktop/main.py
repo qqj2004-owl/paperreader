@@ -4,7 +4,14 @@
 用法:  python desktop/main.py
 依赖:  pip install pywebview
 """
+import os
+import sys
 import threading
+
+# 无论从哪个目录启动，都把项目根目录加入 sys.path，确保能 import paperreader 包
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 
 def main():
