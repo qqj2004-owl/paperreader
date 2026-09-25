@@ -6,6 +6,7 @@
   python -m paperreader in.pdf --title "标题" --meta "作者 — 期刊" [--no-figures]
 """
 import argparse
+import hashlib
 
 from .extract import build_document, clean, extract, parse_units
 from .figures import extract_figures
@@ -67,10 +68,12 @@ def main(argv=None):
         with open(args.gen_zh, "w", encoding="utf-8") as fh:
             json.dump(zh, fh, ensure_ascii=False, indent=1)
 
+    doc = hashlib.md5(open(args.pdf, "rb").read()).hexdigest()
     html = build_reader(
         sentences, headings,
         title=args.title, meta=args.meta, abstract=args.abstract,
         annotations=annotations, glossary=glossary, zh=zh, figures=figures,
+        doc=doc,
     )
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(html)

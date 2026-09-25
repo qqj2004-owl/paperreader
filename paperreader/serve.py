@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """本地网页外壳：Flask 服务，浏览器打开后上传任意 PDF 即生成交互阅读器。"""
 import base64
+import hashlib
 import io
+import json
 import os
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -13,6 +15,17 @@ from .vision import extract_pages, vision_to_document
 from .reader import build_reader
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+
+
+def _doc_key(pdf_bytes):
+    """用 PDF 内容哈希作为文档唯一标识，让同一篇论文的阅读进度跨启动复用。"""
+    return hashlib.md5(pdf_bytes).hexdigest()
+
+
+def _state_path(app, doc):
+    d = os.path.join(app.instance_path, "state")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, doc + ".json")
 
 
 def create_app(config=None):
@@ -53,14 +66,24 @@ def create_app(config=None):
         f = request.files.get("file")
         if f is None:
             return "缺少文件", 400
+        pdf_bytes = f.read()
         tmp = os.path.join(app.instance_path, "upload.pdf")
         os.makedirs(app.instance_path, exist_ok=True)
         with open(tmp, "wb") as fh:
-            fh.write(f.read())
+            fh.write(pdf_bytes)
         title = (request.form.get("title") or "").strip()
         meta = (request.form.get("meta") or "").strip()
         abstract = (request.form.get("abstract") or "").strip()
         use_vision = (request.form.get("vision") or "").strip() in ("1", "true", "on", "yes")
+        doc = _doc_key(pdf_bytes)
+        state = {}
+        state_file = _state_path(app, doc)
+        if os.path.exists(state_file):
+            try:
+                with open(state_file, encoding="utf-8") as fh:
+                    state = json.load(fh)
+            except (OSError, ValueError):
+                state = {}
         try:
             if use_vision:
                 sentences, headings = vision_to_document(
@@ -69,7 +92,7 @@ def create_app(config=None):
                 sentences, headings = build_document(parse_units(clean(extract(tmp))))
             figs = extract_figures(tmp)
             html = build_reader(sentences, headings, title=title, meta=meta,
-                                abstract=abstract, figures=figs)
+                                abstract=abstract, figures=figs, doc=doc, state=state)
         except Exception as e:  # noqa: BLE001
             return "生成失败: %s" % e, 500
         return html, 200, {"Content-Type": "text/html; charset=utf-8"}
@@ -109,6 +132,28 @@ def create_app(config=None):
             return jsonify({"terms": provider.glossary(text)})
         except ProviderError as e:
             return jsonify({"error": str(e)}), 503
+
+    @app.route("/api/state/<doc>", methods=["GET"])
+    def api_state_get(doc):
+        p = _state_path(app, doc)
+        if os.path.exists(p):
+            try:
+                with open(p, encoding="utf-8") as fh:
+                    return jsonify(json.load(fh))
+            except (OSError, ValueError):
+                pass
+        return jsonify({})
+
+    @app.route("/api/state/<doc>", methods=["POST"])
+    def api_state_save(doc):
+        body = request.get_json(force=True, silent=True) or {}
+        p = _state_path(app, doc)
+        try:
+            with open(p, "w", encoding="utf-8") as fh:
+                json.dump(body, fh, ensure_ascii=False)
+            return jsonify({"ok": True})
+        except OSError as e:
+            return jsonify({"error": str(e)}), 500
 
     return app
 

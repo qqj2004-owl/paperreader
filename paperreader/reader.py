@@ -72,12 +72,25 @@ def _figure_html(n, png_bytes, caption, ref_id=None):
 
 
 def build_reader(sentences, headings, *, title, meta, abstract="",
-                 annotations=None, glossary=None, zh=None, figures=None):
-    """figures: [{fig, caption, png_bytes}]。"""
+                 annotations=None, glossary=None, zh=None, figures=None,
+                 doc="", state=None):
+    """figures: [{fig, caption, png_bytes}]。
+
+    doc: 文档唯一标识（PDF 的 md5），用于把阅读进度存到服务端、跨启动复用。
+    state: 已保存的阅读进度 {marked, generatedAnn, zh, llm}，渲染时烘进 HTML。
+    """
     annotations = annotations or {}
     glossary = glossary or {}
     zh = zh or []
     figures = figures or []
+    state = state or {}
+    if not zh and state.get("zh"):
+        zh = state["zh"]
+    state_small = {
+        "marked": state.get("marked", []),
+        "generatedAnn": state.get("generatedAnn", {}),
+        "llm": state.get("llm", {}),
+    }
 
     toc = build_toc(headings, sentences)
 
@@ -103,4 +116,6 @@ def build_reader(sentences, headings, *, title, meta, abstract="",
         .replace("__GLOSSARY__", json.dumps(glossary, ensure_ascii=False))
         .replace("__TOC__", json.dumps(toc, ensure_ascii=False))
         .replace("__ZH__", json.dumps(zh, ensure_ascii=False))
+        .replace("__DOC__", html.escape(doc))
+        .replace("__STATE__", json.dumps(state_small, ensure_ascii=False))
     )

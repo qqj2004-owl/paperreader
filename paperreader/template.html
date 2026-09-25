@@ -329,6 +329,9 @@
         <button id="tocBtn">目录</button>
         <button id="figBtn">配图</button>
         <button id="translateAllBtn">翻译全文</button>
+        <button id="backupBtn" title="把标记/讲解/译文存成文件">备份</button>
+        <button id="restoreBtn" title="从备份文件恢复进度">恢复</button>
+        <input type="file" id="restoreFile" accept="application/json,.json" hidden>
         <span class="search">
           <input type="search" id="searchInput" placeholder="搜索全文…">
           <span class="cnt" id="searchCount"></span>
@@ -400,6 +403,8 @@ __FIGURES__
   var GLOSSARY = __GLOSSARY__;
   var TOC = __TOC__;
   var ZH = __ZH__;
+  var DOC = "__DOC__";
+  var SAVED_STATE = __STATE__;
   if (!ZH.length) ZH = loadJSON('pir_zh', []);
 
   var STORE_KEY = 'pir_marked_v2';
@@ -413,9 +418,31 @@ __FIGURES__
   /* ---------- 状态持久化 ---------- */
   function loadJSON(key, dflt) { try { return JSON.parse(localStorage.getItem(key)) ?? dflt; } catch (e) { return dflt; } }
   function saveJSON(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {} }
-  var marked = loadJSON(STORE_KEY, []);
+  var savedMarked = SAVED_STATE.marked || [];
+  var savedGenAnn = SAVED_STATE.generatedAnn || {};
+  var savedLlm = (SAVED_STATE.llm && Object.keys(SAVED_STATE.llm).length) ? SAVED_STATE.llm : null;
+  var marked = [];
+  savedMarked.concat(loadJSON(STORE_KEY, [])).forEach(function (id) {
+    if (marked.indexOf(id) === -1) marked.push(id);
+  });
+  var generatedAnn = Object.assign({}, loadJSON('pir_generated_ann', {}), savedGenAnn);
+  if (savedLlm) saveJSON('pir_llm', savedLlm);
 
-  var generatedAnn = loadJSON('pir_generated_ann', {});
+  var stateTimer = null;
+  function saveState() {
+    saveJSON(STORE_KEY, marked);
+    saveJSON('pir_generated_ann', generatedAnn);
+    saveJSON('pir_zh', ZH);
+    if (!DOC || location.protocol !== 'http:') return;
+    clearTimeout(stateTimer);
+    stateTimer = setTimeout(function () {
+      fetch('/api/state/' + DOC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marked: marked, generatedAnn: generatedAnn, zh: ZH, llm: loadJSON('pir_llm', {}) })
+      }).catch(function () {});
+    }, 400);
+  }
   function hasAnnotation(id) {
     return Object.prototype.hasOwnProperty.call(ANNOTATIONS, id) ||
            Object.prototype.hasOwnProperty.call(generatedAnn, id);
@@ -522,7 +549,7 @@ __FIGURES__
     if (gen) { generateExplain(id, sentEl); return; }
     var idx = marked.indexOf(id);
     if (idx === -1) marked.push(id); else marked.splice(idx, 1);
-    saveJSON(STORE_KEY, marked);
+    saveState();
     updateSentenceById(id);
   }
 
@@ -791,9 +818,48 @@ __FIGURES__
   document.getElementById('clearBtn').addEventListener('click', function () {
     if (!confirm('清除全部标记？（讲解内容不受影响）')) return;
     marked = [];
-    saveJSON(STORE_KEY, marked);
+    saveState();
     var all = document.querySelectorAll('[data-id]');
     for (var i = 0; i < all.length; i++) updateSentence(all[i]);
+  });
+
+  /* ---------- 备份 / 恢复进度 ---------- */
+  function collectState() {
+    return { marked: marked, generatedAnn: generatedAnn, zh: ZH, llm: loadJSON('pir_llm', {}) };
+  }
+  document.getElementById('backupBtn').addEventListener('click', function () {
+    var blob = new Blob([JSON.stringify(collectState(), null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'paperreader-进度备份.json';
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  });
+  document.getElementById('restoreBtn').addEventListener('click', function () {
+    document.getElementById('restoreFile').click();
+  });
+  document.getElementById('restoreFile').addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var r = new FileReader();
+    r.onload = function () {
+      try {
+        var d = JSON.parse(r.result);
+        if (Array.isArray(d.marked)) marked = d.marked;
+        if (d.generatedAnn && typeof d.generatedAnn === 'object') generatedAnn = d.generatedAnn;
+        if (Array.isArray(d.zh)) ZH = d.zh;
+        if (d.llm && typeof d.llm === 'object') saveJSON('pir_llm', d.llm);
+        saveState();
+        zhRendered = false;
+        var all = paperEl.querySelectorAll('.sentence');
+        for (var i = 0; i < all.length; i++) updateSentence(all[i]);
+        updateCounts();
+        if (viewIsZh()) renderZh();
+        alert('已恢复进度（标记 ' + marked.length + ' 条 / 译文 ' + ZH.length + ' 句）。');
+      } catch (err) { alert('恢复失败：文件格式不正确。'); }
+    };
+    r.readAsText(file);
+    e.target.value = '';
   });
 
   /* ---------- 直接讲解（浏览器直连 LLM） ---------- */
@@ -839,7 +905,7 @@ __FIGURES__
       var content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
       if (!content) throw new Error('无返回内容');
       generatedAnn[id] = parseExplainJson(content);
-      saveJSON('pir_generated_ann', generatedAnn);
+      saveState();
       updateSentenceById(id);
       toggleAnnotation(id, sentEl);
     }).catch(function (err) {
@@ -934,7 +1000,7 @@ __FIGURES__
       }
       if (!zh.length) { alert('翻译失败，请检查「讲解设置」里的 key / 接口地址，或稍后重试。'); return; }
       ZH = zh;
-      saveJSON('pir_zh', ZH);
+      saveState();
       zhRendered = false;
       if (viewIsZh()) renderZh();
       alert('翻译完成：' + zh.length + '/' + items.length + ' 句。点击「中文译文」查看。');
@@ -964,6 +1030,7 @@ __FIGURES__
       model: document.getElementById('llmModel').value.trim(),
       api_key: document.getElementById('llmKey').value.trim()
     });
+    saveState();
     closeLLM();
   });
 
