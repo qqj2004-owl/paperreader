@@ -44,6 +44,7 @@ def main(argv=None):
     ap.add_argument("--abstract", default="")
     ap.add_argument("--no-figures", action="store_true", help="不提取配图")
     ap.add_argument("--vision", action="store_true", help="用视觉 LLM 整页提取（兜底乱码 PDF）")
+    ap.add_argument("--vision-workers", type=int, default=4, help="视觉提取并发页数（默认 4，限流时调小）")
     ap.add_argument("--annotations", default=None, help="注解 JSON（可选）")
     ap.add_argument("--glossary", default=None, help="术语表 JSON（可选）")
     ap.add_argument("--zh", default=None, help="译文 JSON（可选，句级对齐格式）")
@@ -51,7 +52,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     if args.vision:
-        units = extract_pages(args.pdf, load_vision_provider())
+        units = extract_pages(args.pdf, load_vision_provider(), workers=args.vision_workers)
         sentences, headings = vision_to_document(units)
     else:
         sentences, headings = build_document(parse_units(clean(extract(args.pdf))))

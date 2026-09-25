@@ -6,6 +6,8 @@
 """
 import base64
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 try:
     import fitz  # pymupdf
@@ -70,37 +72,66 @@ def _parse_items(raw):
     return []
 
 
-def extract_pages(pdf_path, provider, *, dpi=150, pages=None, on_page=None):
+def extract_pages(pdf_path, provider, *, dpi=150, pages=None, on_page=None, workers=4):
     """整页视觉提取，返回 [(kind, text)] 单元列表。
 
     kind ∈ h1 / h2 / s / caption / ref / skip。pages 为要处理的页码列表
     （0 起），None 表示全部页；on_page(done, total) 用于进度反馈。
+    workers 为并发页数——视觉 LLM 每页要几十秒，串行很慢，多页并行可
+    接近线性提速（默认 4，可按配额/限流调小）。
     """
     if fitz is None:
         raise RuntimeError("缺少 pymupdf，请先 `pip install pymupdf`")
     doc = fitz.open(str(pdf_path))
-    units = []
     try:
         idxs = list(range(doc.page_count)) if pages is None else \
             [p for p in pages if 0 <= p < doc.page_count]
         total = len(idxs)
-        for k, i in enumerate(idxs):
-            dataurl = _page_dataurl(doc[i], dpi)
+        # 先把所有页渲染成图（这一步很快），只并行慢的 LLM 调用
+        dataurls = [_page_dataurl(doc[i], dpi) for i in idxs]
+    finally:
+        doc.close()
+
+    if total == 0:
+        return []
+
+    results = [None] * total
+    done = 0
+    lock = threading.Lock()
+
+    def _work(pos, dataurl):
+        nonlocal done
+        try:
             items = _parse_items(provider.chat_vision(PAGE_PROMPT, [dataurl]))
             if not items:
                 # 模型偶发返回空/非 JSON，重试一次
                 items = _parse_items(provider.chat_vision(PAGE_PROMPT, [dataurl]))
-            for it in items:
-                if not isinstance(it, dict):
-                    continue
-                text = (it.get("text") or "").strip()
-                if not text:
-                    continue
-                units.append((it.get("type", "s"), text))
-            if on_page:
-                on_page(k + 1, total)
-    finally:
-        doc.close()
+            return items
+        finally:
+            with lock:
+                done += 1
+                if on_page:
+                    on_page(done, total)
+
+    if workers <= 1 or total == 1:
+        for pos, dataurl in enumerate(dataurls):
+            results[pos] = _work(pos, dataurl)
+    else:
+        with ThreadPoolExecutor(max_workers=min(workers, total)) as ex:
+            futures = [ex.submit(_work, pos, dataurl)
+                       for pos, dataurl in enumerate(dataurls)]
+            for pos, fut in enumerate(futures):
+                results[pos] = fut.result()
+
+    units = []
+    for items in results:
+        for it in (items or []):
+            if not isinstance(it, dict):
+                continue
+            text = (it.get("text") or "").strip()
+            if not text:
+                continue
+            units.append((it.get("type", "s"), text))
     return units
 
 

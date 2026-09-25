@@ -55,6 +55,8 @@ pip install -r requirements.txt
 python -m paperreader paper.pdf -o reader.html --title "标题" --meta "作者 — 期刊"
 # 字体法提取乱码时，改用视觉 LLM 整页识别：
 python -m paperreader paper.pdf --vision -o reader.html
+# 视觉提取默认 4 页并行；配额/限流时调小：
+python -m paperreader paper.pdf --vision --vision-workers 2 -o reader.html
 ```
 
 生成的 `reader.html` 是**单文件、可离线打开**的（配图已 base64 内嵌）。
