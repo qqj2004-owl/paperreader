@@ -8,6 +8,8 @@ config.json
 /*.html
 # 生成的演示数据（含论文原文/译文，勿提交）
 zh_sentences.json
+# 本地启动脚本（含本机绝对路径，勿提交）
+*.bat
 .DS_Store
 *.egg-info/
 build/

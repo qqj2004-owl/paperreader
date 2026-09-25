@@ -58,15 +58,17 @@ def _caption_title(caption, n):
     return t.split(". ")[0].strip()
 
 
-def _figure_html(n, png_bytes, caption):
+def _figure_html(n, png_bytes, caption, ref_id=None):
     dataurl = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
     title = _caption_title(caption, n)
+    ref_attr = ' data-ref="%s"' % ref_id if ref_id else ""
+    jump = ' <a class="fig-jump" data-ref="%s" title="跳到引用处">定位 ↩</a>' % ref_id if ref_id else ""
     return (
-        '<figure class="fig" data-fig="%d">'
+        '<figure class="fig" data-fig="%d"%s>'
         '<img src="%s" alt="Fig. %d — %s" title="%s" loading="lazy">'
-        '<figcaption>Fig. %d · 点击图片放大</figcaption>'
+        '<figcaption>Fig. %d · 点击放大%s</figcaption>'
         '</figure>'
-    ) % (n, dataurl, n, html.escape(title), html.escape(title), n)
+    ) % (n, ref_attr, dataurl, n, html.escape(title), html.escape(title), n, jump)
 
 
 def build_reader(sentences, headings, *, title, meta, abstract="",
@@ -79,19 +81,24 @@ def build_reader(sentences, headings, *, title, meta, abstract="",
 
     toc = build_toc(headings, sentences)
 
-    fig_at = {}
+    # 配图统一放进右侧配图栏（不内嵌到正文），按首次引用顺序排列，
+    # 中英视图共用，翻译后配图仍在侧栏可见。
+    fig_items = []
     for f in figures:
         idx = _first_ref_index(sentences, f["fig"])
-        if idx is None:
-            continue
-        fig_at.setdefault(idx, []).append(_figure_html(f["fig"], f["png_bytes"], f["caption"]))
+        ref_id = "s-%04d" % (idx + 1) if idx is not None else None
+        fig_items.append((idx if idx is not None else len(sentences),
+                          _figure_html(f["fig"], f["png_bytes"], f["caption"], ref_id)))
+    fig_items.sort(key=lambda x: x[0])
+    figures_html = "\n".join(item[1] for item in fig_items)
 
     return (
         TEMPLATE
         .replace("__TITLE__", html.escape(title))
         .replace("__META__", html.escape(meta))
         .replace("__ABSTRACT__", "<b>摘要</b> " + html.escape(abstract) if abstract else "")
-        .replace("__SENTENCES__", build_sentences_html(sentences, headings, fig_at))
+        .replace("__SENTENCES__", build_sentences_html(sentences, headings, None))
+        .replace("__FIGURES__", figures_html)
         .replace("__ANNOTATIONS__", json.dumps(annotations, ensure_ascii=False))
         .replace("__GLOSSARY__", json.dumps(glossary, ensure_ascii=False))
         .replace("__TOC__", json.dumps(toc, ensure_ascii=False))

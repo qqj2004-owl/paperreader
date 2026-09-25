@@ -116,6 +116,37 @@
   #tocList li.toc-h2 { padding-left: 28px; color: var(--muted); }
   #tocList li.toc-h2:hover { color: var(--ink); }
 
+  /* ===== 右侧配图栏 ===== */
+  #figPanel {
+    width: 260px; flex: 0 0 260px;
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    position: sticky; top: 0; height: 100vh;
+    overflow-y: auto;
+    padding: 14px 12px 40px;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  #figPanel[hidden] { display: none; }
+  .fig-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-weight: 600; font-size: 0.92em; color: var(--ann-head);
+    margin-bottom: 10px; position: sticky; top: 0; background: var(--panel);
+    padding: 4px 0; z-index: 1;
+  }
+  .fig-head button { border: none; background: none; cursor: pointer; font-size: 1.1em; color: var(--muted); }
+  #figPanel .fig { margin: 0 0 18px; text-align: center; }
+  #figPanel .fig img {
+    max-width: 100%; height: auto; border: 1px solid var(--border);
+    border-radius: 6px; cursor: zoom-in; background: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  #figPanel .fig figcaption {
+    margin-top: 5px; font-size: 0.75em; color: var(--muted); line-height: 1.5;
+  }
+  #figPanel .fig-jump { color: var(--ann-head); cursor: pointer; white-space: nowrap; }
+  #figPanel .fig-jump:hover { text-decoration: underline; }
+  #figPanel .fig-empty { color: var(--muted); font-size: 0.85em; }
+
   /* ===== 正文句子 ===== */
   .sec-head {
     font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
@@ -296,6 +327,7 @@
           <button id="zhBtn">中文译文</button>
         </div>
         <button id="tocBtn">目录</button>
+        <button id="figBtn">配图</button>
         <button id="translateAllBtn">翻译全文</button>
         <span class="search">
           <input type="search" id="searchInput" placeholder="搜索全文…">
@@ -324,6 +356,10 @@ __SENTENCES__
       <div id="zhView" hidden></div>
     </div>
   </div>
+  <aside id="figPanel" hidden>
+    <div class="fig-head"><span>配图</span><button id="figClose" title="关闭">×</button></div>
+__FIGURES__
+  </aside>
 </div>
 
 <div id="glossTip" hidden></div>
@@ -690,17 +726,32 @@ __SENTENCES__
     if (e.key === 'Escape') glossTip.hidden = true;
   });
 
-  /* ---------- 配图放大灯箱 ---------- */
+  /* ---------- 配图：灯箱 + 侧栏 ---------- */
   var lightbox = document.getElementById('lightbox');
   var lightboxImg = document.getElementById('lightboxImg');
-  paperEl.addEventListener('click', function (e) {
+  var figPanel = document.getElementById('figPanel');
+  document.addEventListener('click', function (e) {
     var img = e.target.closest && e.target.closest('.fig img');
-    if (!img) return;
-    lightboxImg.src = img.src;
-    lightbox.hidden = false;
+    if (img) {
+      lightboxImg.src = img.src;
+      lightbox.hidden = false;
+      return;
+    }
+    var jump = e.target.closest && e.target.closest('.fig-jump');
+    if (jump) {
+      var ref = jump.getAttribute('data-ref');
+      if (ref) jumpToEnglish(ref);
+    }
   });
   lightbox.addEventListener('click', function () { lightbox.hidden = true; });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') lightbox.hidden = true; });
+
+  function toggleFigPanel(force) {
+    var open = force !== undefined ? force : figPanel.hidden;
+    figPanel.hidden = !open;
+  }
+  document.getElementById('figBtn').addEventListener('click', function () { toggleFigPanel(); });
+  document.getElementById('figClose').addEventListener('click', function () { toggleFigPanel(false); });
 
   /* ---------- 导出待讲解 ---------- */
   function collectPending() {
@@ -921,6 +972,8 @@ __SENTENCES__
     var all = paperEl.querySelectorAll('.sentence');
     document.getElementById('totalCount').textContent = all.length;
     for (var i = 0; i < all.length; i++) updateSentence(all[i]);
+    var hasFig = figPanel.querySelector('.fig') !== null;
+    if (!hasFig) document.getElementById('figBtn').style.display = 'none';
     if (viewIsZh()) switchView('zh');
   })();
 </script>
