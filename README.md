@@ -112,14 +112,14 @@ export PAPERREADER_VISION_API_KEY=你的key
 {
   "vision_provider": "doubao",
   "vision_base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-  "vision_model": "doubao-seed-2-0-pro-260215",
+  "vision_model": "doubao-seed-2-0-mini-260428",
   "vision_api_key": "你的key"
 }
 ```
 
 | vision_provider | base_url | model |
 | --- | --- | --- |
-| `doubao` | `https://ark.cn-beijing.volces.com/api/v3/chat/completions` | `doubao-seed-2-0-pro-260215` |
+| `doubao` | `https://ark.cn-beijing.volces.com/api/v3/chat/completions` | `doubao-seed-2-0-mini-260428` |
 | `openai` | `https://api.openai.com/v1` | `gpt-4o` |
 
 > 说明：所谓「内置 agent」就是内置了这个 LLM 调用层（`agents.py`），并非打包独立程序。

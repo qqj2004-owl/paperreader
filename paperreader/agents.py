@@ -146,11 +146,11 @@ PRESETS = {
 }
 
 # 视觉模型 preset（整页视觉提取 / 疑难页兜底）。豆包走火山方舟 Ark 的
-# OpenAI 兼容端点，base_url 直接给完整 /chat/completions 地址即可。
+# OpenAI 兼容 /chat/completions 端点（mini 模型也支持，且比 pro 快）。
 VISION_PRESETS = {
     "doubao": {
         "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-        "model": "doubao-seed-2-0-pro-260215",
+        "model": "doubao-seed-2-0-mini-260428",
     },
     "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o"},
 }
